@@ -8,6 +8,9 @@ app = Flask(__name__)
 @app.route('/upload', methods=['POST'])
 def upload():
     data = request.json
+    if not data:
+        return jsonify({"message": "No input data"}), 400
+        
     file_base64 = data.get('file_base64')
     file_name = data.get('file_name')
     folder_path = data.get('folder_path', '/')
@@ -16,9 +19,7 @@ def upload():
         return jsonify({"message": "Missing file data or name"}), 400
 
     try:
-        # Base64をバイナリにデコード
         file_content = base64.b64decode(file_base64)
-        
         dbx = dropbox.Dropbox(os.environ.get('DROPBOX_ACCESS_TOKEN'))
         target_path = f"{folder_path}/{file_name}".replace('//', '/')
         
