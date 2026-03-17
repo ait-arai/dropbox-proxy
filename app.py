@@ -1,57 +1,31 @@
 import os
-import requests
+import base64
 from flask import Flask, request, jsonify
+import dropbox
 
 app = Flask(__name__)
 
-# 環境変数の取得
-DROPBOX_APP_KEY = os.environ.get('DROPBOX_APP_KEY')
-DROPBOX_APP_SECRET = os.environ.get('DROPBOX_APP_SECRET')
-DROPBOX_REFRESH_TOKEN = os.environ.get('DROPBOX_REFRESH_TOKEN')
-
-def get_access_token():
-    """リフレッシュトークンを使用して新しいアクセストークンを取得"""
-    url = "https://api.dropbox.com/oauth2/token"
-    data = {
-        "grant_type": "refresh_token",
-        "refresh_token": DROPBOX_REFRESH_TOKEN,
-        "client_id": DROPBOX_APP_KEY,
-        "client_secret": DROPBOX_APP_SECRET,
-    }
-    response = requests.post(url, data=data)
-    return response.json().get("access_token")
-
 @app.route('/upload', methods=['POST'])
-def upload_to_dropbox():
-    # 1. wxOから送られてくる情報を取得
-    # ファイル本体、ファイル名、保存先フォルダパス
-    file = request.files.get('file')
-    file_name = request.form.get('file_name')
-    folder_path = request.form.get('folder_path', '') # 指定がなければルート
+def upload():
+    data = request.json
+    file_base64 = data.get('file_base64')
+    file_name = data.get('file_name')
+    folder_path = data.get('folder_path', '/')
 
-    if not file or not file_name:
-        return jsonify({"error": "Missing file or file_name"}), 400
+    if not file_base64 or not file_name:
+        return jsonify({"message": "Missing file data or name"}), 400
 
-    # 2. Dropbox上のフルパスを生成（例: /MyFolder/test.pdf）
-    # フォルダパスの先頭にスラッシュがない場合は補完
-    full_path = f"/{folder_path.strip('/')}/{file_name}".replace('//', '/')
-
-    access_token = get_access_token()
-    
-    # 3. Dropbox APIへ転送
-    url = "https://content.dropboxapi.com/2/files/upload"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Dropbox-API-Arg": f'{{"path": "{full_path}","mode": "add","autorename": true,"mute": false,"strict_conflict": false}}',
-        "Content-Type": "application/octet-stream"
-    }
-
-    response = requests.post(url, headers=headers, data=file.read())
-
-    if response.status_code == 200:
-        return jsonify({"message": f"Successfully uploaded to {full_path}"}), 200
-    else:
-        return jsonify({"error": response.text}), response.status_code
+    try:
+        # Base64をバイナリにデコード
+        file_content = base64.b64decode(file_base64)
+        
+        dbx = dropbox.Dropbox(os.environ.get('DROPBOX_ACCESS_TOKEN'))
+        target_path = f"{folder_path}/{file_name}".replace('//', '/')
+        
+        dbx.files_upload(file_content, target_path, mode=dropbox.files.WriteMode.overwrite)
+        return jsonify({"message": f"Successfully uploaded {file_name} to {folder_path}"}), 200
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    app.run(host='0.0.0.0', port=8080)
