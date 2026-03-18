@@ -1,7 +1,7 @@
 import os
 from flask import Flask, request, render_template_string
 import dropbox
-from dropbox.exceptions import AuthError
+from dropbox.exceptions import AuthError, ApiError
 from dropbox.files import WriteMode
 
 app = Flask(__name__)
@@ -19,17 +19,27 @@ def get_dropbox_client():
     )
 
 def get_folder_list():
-    """Dropbox内のフォルダ一覧を取得"""
+    """Dropbox内のフォルダ一覧を取得。エラー時は詳細を画面に返す"""
     folders = [("/", "ルート直下")]
     try:
         dbx = get_dropbox_client()
-        res = dbx.files_list_folder('', recursive=True)
+        # ルート(空文字)から探索。recursiveを一旦Falseにして確実に取得を試みる
+        res = dbx.files_list_folder('', recursive=False)
+        
         for entry in res.entries:
             if isinstance(entry, dropbox.files.FolderMetadata):
                 folders.append((entry.path_display, entry.path_display))
+        
+        # フォルダ名でソート
         return sorted(folders, key=lambda x: x[0])
-    except Exception:
-        return [("/", "ルート直下 (取得失敗)")]
+    
+    except AuthError:
+        return [("/", "ルート直下 (エラー: 認証失敗/トークン無効)")]
+    except ApiError as e:
+        return [("/", f"ルート直下 (エラー: API制限/パス不正 {e})")]
+    except Exception as e:
+        # その他の予期せぬエラー
+        return [("/", f"ルート直下 (取得失敗: {type(e).__name__})")]
 
 # HTMLテンプレート
 HTML_TEMPLATE = """
@@ -107,7 +117,7 @@ def upload():
         </div>
         """
     except Exception as e:
-        return f"Error: {e}", 500
+        return f"Error during upload: {e}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
