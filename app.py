@@ -3,7 +3,8 @@ from flask import Flask, render_template, request, redirect, url_for
 import dropbox
 from dropbox.exceptions import AuthError
 
-app = Flask(__name__)
+# テンプレートの場所を明示的に指定（昨日解決したポイントです）
+app = Flask(__name__, template_folder='templates')
 
 # 環境変数から情報を取得
 DROPBOX_APP_KEY = os.environ.get('DROPBOX_APP_KEY')
@@ -21,6 +22,7 @@ def get_dropbox_client():
 
 @app.route('/')
 def index():
+    # templates/index.html を表示
     return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
@@ -29,36 +31,37 @@ def upload():
         return "ファイルがありません", 400
     
     file = request.files['file']
+    # フォームから保存先フォルダ名を取得し、前後の空白やスラッシュを掃除
     folder_name = request.form.get('folder_name', '').strip()
 
     if file.filename == '':
         return "ファイル名が空です", 400
 
-    # --- パス作成の修正（ルート直下対応） ---
-    # フォルダ名の前後にあるスラッシュを削る
+    # --- ルート直下保存のためのパス作成ロジック ---
     clean_folder = folder_name.strip("/")
     
     if clean_folder == "":
-        # フォルダ指定がない、または "/" のみの場合はルート直下
+        # フォルダ指定がない場合は、ルート直下 "/ファイル名"
         dropbox_path = f"/{file.filename}"
     else:
-        # フォルダ指定がある場合
+        # フォルダ指定がある場合は "/フォルダ名/ファイル名"
         dropbox_path = f"/{clean_folder}/{file.filename}"
-    # ---------------------------------------
+    # --------------------------------------------
 
     try:
         dbx = get_dropbox_client()
-        # ファイルをアップロード（上書きモード）
+        # ファイルをアップロード（同名ファイルは上書き）
         dbx.files_upload(file.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
         
+        # 成功画面を表示し、保存先パスを渡す
         return render_template('success.html', filename=file.filename, folder=dropbox_path)
     
     except AuthError as e:
-        return f"認証エラーが発生しました。トークンを確認してください: {e}", 401
+        return f"認証エラーが発生しました。トークンを再確認してください: {e}", 401
     except Exception as e:
-        return f"エラーが発生しました: {e}", 500
+        return f"アップロード中にエラーが発生しました: {e}", 500
 
 if __name__ == '__main__':
-    # Code Engineなどの環境に合わせてポート番号を動的に取得
+    # Code Engine環境のポート番号に対応
     port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port)D
