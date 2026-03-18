@@ -1,0 +1,5 @@
+Flask
+gunicorn
+requests
+dropbox
+urllib3<2.0.0
