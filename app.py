@@ -1,29 +1,76 @@
 import os
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, request, render_template_string
 import dropbox
 from dropbox.exceptions import AuthError
 
-# テンプレートの場所を明示的に指定（昨日解決したポイントです）
-app = Flask(__name__, template_folder='templates')
+app = Flask(__name__)
 
 # 環境変数から情報を取得
 DROPBOX_APP_KEY = os.environ.get('DROPBOX_APP_KEY')
 DROPBOX_APP_SECRET = os.environ.get('DROPBOX_APP_SECRET')
 DROPBOX_REFRESH_TOKEN = os.environ.get('DROPBOX_REFRESH_TOKEN')
 
+# HTMLテンプレート（app.pyの中に直接書き込みます）
+INDEX_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dropbox アップロード</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; padding-top: 50px; background-color: #f5f7f9; }
+        .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); width: 400px; }
+        h2 { color: #0061ff; }
+        input[type="text"], input[type="file"] { width: 100%; margin: 10px 0 20px 0; padding: 10px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background-color: #0061ff; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #0050d5; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Dropbox アップロード</h2>
+        <form action="/upload" method="post" enctype="multipart/form-data">
+            <label>1. PC内のファイルを選択</label>
+            <input type="file" name="file" required>
+            <label>2. Dropbox保存先フォルダ (例: /Photos)</label>
+            <input type="text" name="folder_name" placeholder="ルートに保存する場合は空欄か / ">
+            <button type="submit">アップロード実行</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+SUCCESS_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>アップロード完了</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding-top: 100px; }
+        .success { color: #2d8a3c; }
+    </style>
+</head>
+<body>
+    <h1 class="success">アップロード完了</h1>
+    <p>ファイル: {{ filename }}</p>
+    <p>保存先: {{ folder }}</p>
+    <br>
+    <a href="/">← 戻る</a>
+</body>
+</html>
+"""
+
 def get_dropbox_client():
-    """リフレッシュトークンを使用して、有効なアクセスTokenを持つクライアントを生成"""
-    dbx = dropbox.Dropbox(
+    """リフレッシュトークンを使用してクライアントを生成"""
+    return dropbox.Dropbox(
         app_key=DROPBOX_APP_KEY,
         app_secret=DROPBOX_APP_SECRET,
         oauth2_refresh_token=DROPBOX_REFRESH_TOKEN
     )
-    return dbx
 
 @app.route('/')
 def index():
-    # templates/index.html を表示
-    return render_template('index.html')
+    return render_template_string(INDEX_HTML)
 
 @app.route('/upload', methods=['POST'])
 def upload():
@@ -31,37 +78,29 @@ def upload():
         return "ファイルがありません", 400
     
     file = request.files['file']
-    # フォームから保存先フォルダ名を取得し、前後の空白やスラッシュを掃除
     folder_name = request.form.get('folder_name', '').strip()
 
     if file.filename == '':
         return "ファイル名が空です", 400
 
-    # --- ルート直下保存のためのパス作成ロジック ---
+    # --- ルート直下対応のパス整形 ---
     clean_folder = folder_name.strip("/")
-    
     if clean_folder == "":
-        # フォルダ指定がない場合は、ルート直下 "/ファイル名"
         dropbox_path = f"/{file.filename}"
     else:
-        # フォルダ指定がある場合は "/フォルダ名/ファイル名"
         dropbox_path = f"/{clean_folder}/{file.filename}"
-    # --------------------------------------------
+    # ----------------------------
 
     try:
         dbx = get_dropbox_client()
-        # ファイルをアップロード（同名ファイルは上書き）
         dbx.files_upload(file.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
-        
-        # 成功画面を表示し、保存先パスを渡す
-        return render_template('success.html', filename=file.filename, folder=dropbox_path)
+        return render_template_string(SUCCESS_HTML, filename=file.filename, folder=dropbox_path)
     
     except AuthError as e:
-        return f"認証エラーが発生しました。トークンを再確認してください: {e}", 401
+        return f"認証エラー: {e}", 401
     except Exception as e:
-        return f"アップロード中にエラーが発生しました: {e}", 500
+        return f"エラー: {e}", 500
 
 if __name__ == '__main__':
-    # Code Engine環境のポート番号に対応
     port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)D
+    app.run(host='0.0.0.0', port=port)
