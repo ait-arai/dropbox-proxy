@@ -2,7 +2,7 @@ import os
 from flask import Flask, request, render_template_string, jsonify
 import dropbox
 from dropbox.exceptions import AuthError, ApiError
-from dropbox.files import WriteMode
+from dropbox.files import WriteMode  #
 
 app = Flask(__name__)
 
@@ -36,21 +36,27 @@ def get_folder_list():
     except:
         return [("/", "🏠 ルート直下", 0)]
 
-# --- 新設：ファイル存在確認API ---
 @app.route('/check_file', methods=['POST'])
 def check_file():
     data = request.json
     folder = data.get('folder', '/').rstrip('/')
     filename = data.get('filename', '')
-    full_path = f"{folder}/{filename}" if folder != "" else f"/{filename}"
-    if full_path.startswith('//'): full_path = full_path[1:]
+    
+    # パス結合の修正
+    if folder == "":
+        full_path = f"/{filename}"
+    else:
+        full_path = f"{folder}/{filename}"
+    
+    # 二重スラッシュ防止
+    full_path = full_path.replace('//', '/')
     
     try:
         dbx = get_dropbox_client()
         dbx.files_get_metadata(full_path)
-        return jsonify({"exists": True}) # ファイルが存在する
+        return jsonify({"exists": True})
     except:
-        return jsonify({"exists": False}) # 存在しない
+        return jsonify({"exists": False})
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -86,7 +92,6 @@ HTML_TEMPLATE = """
             if (!fileInput.files.length) return;
             const filename = fileInput.files[0].name;
 
-            // 存在チェック
             const response = await fetch('/check_file', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -94,7 +99,6 @@ HTML_TEMPLATE = """
             });
             const result = await response.json();
 
-            // 存在する場合のみ警告を出す
             if (result.exists) {
                 if (!confirm("同名のファイルが既に存在します。上書きしますか？")) {
                     return;
@@ -143,15 +147,28 @@ def upload():
     folder_path = request.form.get('folder_path', '/').rstrip('/')
     if file.filename == '': return "No selected file", 400
 
-    if not folder_path.startswith('/'): folder_path = '/' + folder_path
-    dropbox_path = f"{folder_path}/{file.filename}" if folder_path != "/" else f"/{file.filename}"
-    if dropbox_path.startswith('//'): dropbox_path = dropbox_path[1:]
+    # パス成形のロジックをより確実に
+    clean_folder = folder_path if folder_path.startswith('/') else '/' + folder_path
+    if clean_folder == "/":
+        dropbox_path = f"/{file.filename}"
+    else:
+        dropbox_path = f"{clean_folder}/{file.filename}"
+    
+    # 最終的なパスから二重スラッシュを除去
+    dropbox_path = dropbox_path.replace('//', '/')
 
     try:
         dbx = get_dropbox_client()
-        # ★重要: mode=WriteMode('overwrite') を確実に適用
-        dbx.files_upload(file.read(), dropbox_path, mode=WriteMode('overwrite'), mute=True)
-        return f'<div style="text-align:center;padding-top:100px;font-family:sans-serif;"><h2>成功！</h2><p>{dropbox_path}</p><a href="/">戻る</a></div>'
+        # ★修正ポイント: WriteMode.overwrite を使用
+        dbx.files_upload(
+            file.read(), 
+            dropbox_path, 
+            mode=WriteMode.overwrite, 
+            mute=True
+        )
+        return f'<div style="text-align:center;padding-top:100px;font-family:sans-serif;"><h2>成功！</h2><p>保存先: {dropbox_path}</p><a href="/">戻る</a></div>'
+    except ApiError as e:
+        return f"Dropbox API Error: {e}", 500
     except Exception as e:
         return f"Error: {e}", 500
 
